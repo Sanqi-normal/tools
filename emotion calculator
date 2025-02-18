@@ -1,0 +1,162 @@
+from collections import defaultdict
+import tkinter as tk
+from tkinter import messagebox
+import matplotlib.pyplot as plt
+import matplotlib.backends.backend_tkagg as tkagg
+
+emotions = defaultdict(int, {
+    '快乐': 5,
+    '信任': 5,
+    '恐惧': 5,
+    '惊讶': 5,
+    '悲伤': 5,
+    '厌恶': 5,
+    '愤怒': 5,
+    '期待': 5,
+})
+
+opposite_emotions = {
+    '快乐': '悲伤',
+    '悲伤': '快乐',
+    '信任': '厌恶',
+    '厌恶': '信任',
+    '恐惧': '愤怒',
+    '愤怒': '恐惧',
+    '惊讶': '期待',
+    '期待': '惊讶',
+}
+
+secondary_emotions = {
+    ('快乐', '信任'): '喜爱',
+    ('快乐', '期待'): '乐观',
+    ('恐惧', '信任'): '屈服',
+    ('恐惧', '惊讶'): '敬畏',
+    ('悲伤', '惊讶'): '悲观',
+    ('悲伤', '厌恶'): '悔恨',
+    ('厌恶', '愤怒'): '鄙视',
+    ('愤怒', '期待'): '侵略',
+    ('快乐', '恐惧'): '内疚',
+    ('快乐', '愤怒'): '骄傲',
+    ('信任', '惊讶'): '好奇心',
+    ('信任', '期待'): '宿命论',
+    ('悲伤', '恐惧'): '绝望',
+    ('悲伤', '愤怒'): '嫉妒',
+    ('厌恶', '惊讶'): '难以置信',
+    ('厌恶', '期待'): '愤世嫉俗',
+}
+
+tertiary_emotions = {
+    ('快乐', '惊讶'): '乐趣',
+    ('快乐', '厌恶'): '病态',
+    ('信任', '悲伤'): '感伤',
+    ('信任', '愤怒'): '统治',
+    ('恐惧', '厌恶'): '羞耻',
+    ('恐惧', '期待'): '焦虑',
+    ('惊讶', '愤怒'): '耻辱',
+    ('悲伤', '期待'): '悲观',
+}
+
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+def update_emotion(emotion, change):
+    global emotions
+    emotions[emotion] += change
+    emotions[emotion] = max(1, min(10, emotions[emotion]))
+    opposite_emotion = opposite_emotions[emotion]
+    emotions[opposite_emotion] -= change
+    emotions[opposite_emotion] = max(1, min(10, emotions[opposite_emotion]))
+    plot_emotions(canvas)
+    update_top_emotions_label(canvas)
+
+def plot_emotions(canvas):
+    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
+    ax.set_title("当前情绪", va='bottom',pad=20)
+    labels = ['快乐', '信任', '恐惧', '惊讶', '悲伤', '厌恶', '愤怒', '期待']
+    angles = [n / 8.0 * 2 * 3.14159 for n in range(8)]
+    angles += angles[:1]
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels)
+    emotion_values = [emotions[emotion] for emotion in labels]
+    emotion_values += emotion_values[:1]
+    ax.plot(angles, emotion_values, linewidth=1, linestyle='solid')
+    ax.fill(angles, emotion_values, 'b', alpha=0.3)
+    canvas.figure = fig
+    canvas.draw()
+    plt.close(fig)
+
+def generate_merged_items():
+    merged = {}
+    for pair, name in {**secondary_emotions, **tertiary_emotions}.items():
+        sorted_pair = tuple(sorted(pair))
+        if sorted_pair not in merged or emotions[pair[0]] + emotions[pair[1]] > merged[sorted_pair][1]:
+            merged[sorted_pair] = (name, emotions[pair[0]] + emotions[pair[1]])
+    return merged
+
+def update_top_emotions_label(canvas):
+    # 生成所有可能的情緒項目
+    candidates = []
+    
+    # 添加基本情緒
+    for emo, val in emotions.items():
+        if val > 5:
+            print(f"{emo} ({val})")
+            candidates.append(('basic', val, [emo], f"{emo} ({val})"))
+    
+    # 添加合併情緒
+    merged_items = generate_merged_items()
+    for (pair), (name, total) in merged_items.items():
+        if total > 10:
+            candidates.append(('merged', total, list(pair), f"{name} ({total})"))
+    
+    # 按强度排序（合併情緒使用總和）
+    candidates.sort(key=lambda x: (-x[1], x[0]))
+    print(candidates)
+    selected = []
+    used_emotions = set()
+    
+    # 優先選擇合併情緒
+    for item in candidates:
+        if len(selected) >= 3:
+            break
+        _, _, emotions_involved, display = item
+        if all(emo not in used_emotions for emo in emotions_involved):
+            selected.append(display)
+            used_emotions.update(emotions_involved)
+    
+    # 補足未滿3個的情況
+    if len(selected) < 3:
+        remaining = sorted([(v, k) for k, v in emotions.items()], reverse=True)
+        for val, emo in remaining:
+            if emo not in used_emotions:
+                selected.append(f"{emo} ({val})")
+                if len(selected) == 3:
+                    break
+    
+    top_emotions_label.config(text=f"最突出的情绪: {', '.join(selected[:3])}")
+
+def create_gui():
+    global root, top_emotions_label, canvas
+    root = tk.Tk()
+    root.title("情绪计算器")
+
+    emotions_frame = tk.Frame(root)
+    emotions_frame.pack(pady=10)
+
+    for emotion in emotions:
+        btn = tk.Button(emotions_frame, text=emotion, 
+                       command=lambda e=emotion: update_emotion(e, 1))
+        btn.pack(side=tk.LEFT, padx=5)
+
+    fig = plt.figure(figsize=(6, 6))
+    canvas = tkagg.FigureCanvasTkAgg(fig, master=root)
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+    plot_emotions(canvas)
+
+    top_emotions_label = tk.Label(root, text="最突出的情绪: ", font=('SimHei', 12))
+    top_emotions_label.pack(pady=10)
+
+    root.mainloop()
+
+if __name__ == "__main__":
+    create_gui()
