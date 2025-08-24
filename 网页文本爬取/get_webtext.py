@@ -1,4 +1,5 @@
 ### 用来获取动态加载网页纯文本内容的工具
+### 需下载浏览器驱动器并替换，目前适用于edge
 
 from selenium import webdriver
 from selenium.webdriver.edge.options import Options
@@ -80,4 +81,5 @@ def get_webpage_text(url, output_file="webpage_text.txt"):
 if __name__ == "__main__":
     # 示例用法
     target_url = input("请输入要提取文本的网页URL: ")
+
     get_webpage_text(target_url)
