@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动态 Mermaid 架构浏览器</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none; /* 全局禁用文本选择 */
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            padding: 10px;
+            gap: 10px;
+        }
+
+        /* 左侧控制面板 */
+        .control-panel {
+            width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            padding: 20px;
+            overflow-y: auto;
+            max-height: 100%;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex: 1;
+        }
+
+        textarea {
+            width: 100%;
+            height: 100%;
+            min-height: 300px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* 按钮样式 */
+        button {
+            padding: 8px 16px;
+            background-color: #2c3e50;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            flex: 1;
+        }
+        button:hover:not(:disabled) { background-color: #34495e; transform: translateY(-1px); }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; transform: none; }
+        
+        button.action-btn { background-color: #27ae60; }
+        button.action-btn:hover { background-color: #2ecc71; }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        input[type="number"] {
+            width: 50px;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        /* 右侧图表容器 */
+        .diagram-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 路径导航 */
+        #breadcrumbs {
+            padding: 10px 20px;
+            background: #f1f3f5;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 14px;
+            color: #495057;
+        }
+
+        /* 图表容器 - 支持缩放和拖动 */
+        #diagram-wrapper {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+            cursor: grab;
+        }
+
+        #diagram-container {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: relative;
+            transform-origin: 0 0;
+            transition: transform 0.1s ease;
+        }
+
+        /* 图表内容包装器 - 用于拖拽 */
+        #diagram-content {
+            position: absolute;
+            top: 0;
+            left: 0;
+            padding: 20px;
+            transform-origin: 0 0;
+            transition: transform 0.1s ease;
+        }
+
+        /* 图表内部控制按钮 */
+        .diagram-controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 5px;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            padding: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .diagram-controls button {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            padding: 0;
+            background-color: #2c3e50;
+        }
+
+        .diagram-controls button:hover:not(:disabled) { 
+            background-color: #34495e; 
+            transform: translateY(-1px); 
+        }
+
+        .diagram-controls button:disabled { 
+            background-color: #bdc3c7; 
+            cursor: not-allowed; 
+            transform: none; 
+        }
+
+        /* 缩放指示器 */
+        .zoom-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 10;
+        }
+
+        /* 强制覆盖 Mermaid 样式 */
+        .node.clickable { cursor: pointer !important; }
+        
+        /* 简单的 Loading */
+        #loading { display: none; color: #666; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <!-- 左侧控制面板 -->
+    <div class="control-panel">
+            <div class="control-row">
+                <span style="font-size:14px; color:#555;">显示深度:</span>
+                <input type="number" id="depthInput" value="2" min="1" max="999" onchange="updateDepth()">
+            </div>
+        <div class="input-group">
+            <textarea id="mermaidInput" placeholder="在此粘贴您的 Mermaid 代码 (flowchart TD ...)">
+            </textarea>
+            <div class="button-group">
+                <button class="action-btn" onclick="parseAndLoad()">解析生成</button>
+                <button onclick="loadDemo()">加载示例</button>
+            </div>
+        </div>
+
+        <div class="controls">
+
+            
+            <div id="loading">渲染中...</div>
+        </div>
+    </div>
+
+    <!-- 右侧图表区域 -->
+    <div class="diagram-area">
+        <div id="breadcrumbs">当前位置: Root</div>
+        <div id="diagram-wrapper">
+            <div id="diagram-container">
+                <div id="diagram-content"></div>
+            </div>
+            <div class="diagram-controls">
+                <button id="backBtn" onclick="goBack()" disabled title="返回上级">⬅</button>
+                <button onclick="zoomIn()" title="放大">+</button>
+                <button onclick="zoomOut()" title="缩小">-</button>
+                <button onclick="resetZoom()" title="重置缩放">↺</button>
+            </div>
+            <div class="zoom-indicator" id="zoomIndicator">100%</div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. Mermaid 解析器 (Parser)
+        // ==========================================
+        const demoCode = ``;
+        /**
+         * 将 Mermaid 文本解析为树状结构
+         * 这是一个简化版的解析器，专门针对 subgraph 嵌套结构优化
+         */
+        function parseMermaidCode(code) {
+            // 清理代码：去除 标记，去除多余空格
+            const cleanCode = code.trim();
+            const lines = cleanCode.split('\n');
+            
+            const root = { id: 'Root', label: 'Root', children: [], links: [] };
+            const nodeStack = [root]; // 用于追踪 subgraph 嵌套
+            const allLinks = [];      // 存储所有解析到的连线
+            const nodeMap = {};       // ID -> Node 对象的映射
+            
+            // 简单的正则匹配
+            const subgraphRegex = /^\s*subgraph\s+(\w+)(?:\[(.*?)\])?/;
+            const endRegex = /^\s*end\s*$/;
+            const directionRegex = /^\s*direction\s+(TB|LR|BT|RL)/;
+            // 匹配节点: ID[Label] 或 ID
+            const nodeRegex = /^\s*(\w+)(?:\[(.*?)\])?(?:\s*:::.*)?$/; 
+            // 匹配连线: A --> B, A -- text --> B
+            // 注意：这里简单处理，假设一行主要是一个连线
+            const linkRegex = /^\s*(\w+)\s*-.->\s*(\w+)/; 
+            const linkWithTextRegex = /^\s*(\w+)\s*--.*?-->\s*(\w+)/;
+
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line || line.startsWith('%%') || line.startsWith('flowchart') || line.startsWith('graph')) return;
+
+                const currentParent = nodeStack[nodeStack.length - 1];
+
+                // 1. 检测连线 (优先检测，防止误判为节点)
+                let linkMatch = line.match(linkWithTextRegex) || line.match(linkRegex);
+                if (linkMatch) {
+                    const from = linkMatch[1];
+                    const to = linkMatch[2];
+                    // 保存连线，去除样式定义等杂质
+                    const fullLink = line.split(':::')[0]; 
+                    allLinks.push({ from, to, raw: fullLink });
+                    return;
+                }
+
+                // 2. 检测 Subgraph 开始
+                const subMatch = line.match(subgraphRegex);
+                if (subMatch) {
+                    const id = subMatch[1];
+                    const label = subMatch[2] || id;
+                    const newNode = { 
+                        id, 
+                        label: label.replace(/["']/g, ""), // 去除引号
+                        children: [], 
+                        type: 'subgraph' 
+                    };
+                    
+                    currentParent.children.push(newNode);
+                    nodeStack.push(newNode);
+                    nodeMap[id] = newNode;
+                    return;
+                }
+
+                // 3. 检测 End
+                if (endRegex.test(line)) {
+                    if (nodeStack.length > 1) {
+                        nodeStack.pop();
+                    }
+                    return;
+                }
+
+                // 4. 检测 Direction
+                const dirMatch = line.match(directionRegex);
+                if (dirMatch) {
+                    currentParent.direction = dirMatch[1];
+                    return;
+                }
+
+                // 5. 检测普通节点 (叶子节点)
+                // 排除连线定义行，排除 subgraph 关键字
+                if (!line.includes('-->') && !line.includes('-.->') && !line.startsWith('subgraph')) {
+                    // 尝试提取 ID 和 Label
+                    // 简单的分割逻辑：先看有没有方括号
+                    let id, label;
+                    if (line.includes('[')) {
+                        const parts = line.split('[');
+                        id = parts[0].trim();
+                        label = parts[1].replace(']', '').trim();
+                    } else {
+                        id = line.split(':::')[0].trim(); // 去除样式类
+                        label = id;
+                    }
+
+                    if (id && /^\w+$/.test(id)) { // 确保ID有效
+                        const newNode = { id, label, children: [], type: 'leaf' };
+                        currentParent.children.push(newNode);
+                        nodeMap[id] = newNode;
+                    }
+                }
+            });
+
+            // 将全局连线挂载到 Root (渲染时会过滤)
+            root.links = allLinks;
+            
+            // 如果 Root 只有一个子节点且是 Computer，直接把 Computer 当作起始点更好看
+            if (root.children.length === 1) {
+                const actualRoot = root.children[0];
+                actualRoot.links = allLinks; // 传递连线
+                return actualRoot;
+            }
+
+            return root;
+        }
+
+        // ==========================================
+        // 2. 状态管理与渲染逻辑
+        // ==========================================
+        
+        let fullTree = null;
+        let historyStack = [];
+        let currentNode = null;
+        let viewDepth = 2;
+        let scale = 1;
+        let isDragging = false;
+        let startX, startY, offsetX = 0, offsetY = 0;
+
+        mermaid.initialize({ 
+            startOnLoad: false,
+            securityLevel: 'loose',
+            theme: 'base',
+            themeVariables: {
+                primaryColor: '#e1f5fe',
+                edgeLabelBackground: '#ffffff',
+                clusterBkg: '#ffffff',
+                clusterBorder: '#2c3e50'
+            }
+        });
+
+        // 绑定到 window 以便 HTML 调用
+        window.parseAndLoad = function() {
+            const code = document.getElementById('mermaidInput').value;
+            console.log(code);
+            if (!code.trim()) {
+                alert("请输入 Mermaid 代码");
+                return;
+            }
+            
+            try {
+                fullTree = parseMermaidCode(code);
+                console.log("Parsed Tree:", fullTree); // 调试用
+                
+                // 重置状态
+                historyStack = [];
+                currentNode = fullTree;
+                resetZoom();
+                renderGraph();
+            } catch (e) {
+                console.error(e);
+                alert("解析出错，请检查代码格式");
+            }
+        };
+
+        window.updateDepth = function() {
+            viewDepth = parseInt(document.getElementById('depthInput').value) || 2;
+            resetZoom();
+            renderGraph();
+        };
+
+        window.goBack = function() {
+            if (historyStack.length > 0) {
+                currentNode = historyStack.pop();
+                renderGraph();
+            }
+        };
+
+        window.handleNodeClick = function(nodeId) {
+            // 在全树中查找节点
+            const target = findNodeInTree(fullTree, nodeId);
+            
+            if (target && target.children && target.children.length > 0) {
+                historyStack.push(currentNode);
+                currentNode = target;
+                resetZoom();
+                renderGraph();
+            }
+        };
+
+        function findNodeInTree(node, id) {
+            if (node.id === id) return node;
+            if (node.children) {
+                for (let child of node.children) {
+                    const found = findNodeInTree(child, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        // ==========================================
+        // 3. 递归生成器 (核心逻辑)
+        // ==========================================
+
+        /**
+         * 递归生成 Mermaid 语法
+         * @param node 当前遍历到的节点
+         * @param currentDepth 当前递归深度 (相对渲染起点)
+         * @param maxDepth 最大允许显示的深度
+         * @param visibleNodeIds 用于收集所有渲染出来的节点ID (用于连线过滤)
+         */
+        function buildMermaidString(node, currentDepth, maxDepth, visibleNodeIds) {
+            let syntax = "";
+            const isLeaf = !node.children || node.children.length === 0;
+            const isMaxDepth = currentDepth >= maxDepth;
+
+            // 收集可见ID
+            visibleNodeIds.add(node.id);
+
+            // 1. 如果是叶子节点，或已达到显示深度上限，直接渲染为普通节点
+            if (isLeaf || isMaxDepth) {
+                // 判断是否还有隐藏的子节点 (用于决定是否显示为蓝色可点击)
+                const hasHiddenChildren = !isLeaf;
+                const styleClass = hasHiddenChildren ? "nav" : "leaf";
+                
+                // 生成节点语法: ID["Label"]:::class
+                syntax += `${node.id}["${node.label}"]:::${styleClass}\n`;
+                
+                if (hasHiddenChildren) {
+                    syntax += `click ${node.id} call handleNodeClick("${node.id}")\n`;
+                }
+                return syntax;
+            }
+
+            // 2. 如果是容器节点 (Subgraph) 且未达深度上限
+            // 注意：根节点通常不需要套 subgraph，除非它是嵌套在内部的
+            const isRootOfView = (currentDepth === 0);
+            
+            if (!isRootOfView) {
+                syntax += `subgraph ${node.id} ["${node.label}"]\n`;
+                if (node.direction) syntax += `direction ${node.direction}\n`;
+            }
+
+            // 递归处理子节点
+            node.children.forEach(child => {
+                syntax += buildMermaidString(child, currentDepth + 1, maxDepth, visibleNodeIds);
+            });
+
+            if (!isRootOfView) {
+                syntax += `end\n`;
+            }
+
+            return syntax;
+        }
+
+        async function renderGraph() {
+            const content = document.getElementById('diagram-content');
+            const backBtn = document.getElementById('backBtn');
+            const breadcrumbs = document.getElementById('breadcrumbs');
+            const loading = document.getElementById('loading');
+
+            loading.style.display = 'block';
+            
+            // 0. 准备数据
+            const visibleNodeIds = new Set();
+            
+            // 1. 生成节点结构
+            let graphDefinition = `graph ${currentNode.direction || 'TB'}\n`;
+            graphDefinition += `classDef nav fill:#e3f2fd,stroke:#2196f3,stroke-width:2px,cursor:pointer;\n`;
+            graphDefinition += `classDef leaf fill:#ffffff,stroke:#333,stroke-width:1px;\n`;
+
+            // 从 currentNode 开始递归构建，初始深度为 0
+            // viewDepth 是用户设定的显示层数
+            graphDefinition += buildMermaidString(currentNode, 0, viewDepth, visibleNodeIds);
+
+            // 2. 智能连线生成
+            // 遍历 fullTree 中的所有连线，如果 source 和 target 都在 visibleNodeIds 中，则添加
+            // 这是一个全局搜索，对于大型图表可能需要优化，但在前端万级以下节点没问题
+            // 优化：我们假设 parseMermaidCode 将所有连线存在了 Root (fullTree) 或者 currentNode 上
+            // 实际上连线是跨层级的。最简单的方法是使用全树的连线列表。
+            
+            const linksSource = fullTree.links || []; 
+            linksSource.forEach(link => {
+                if (visibleNodeIds.has(link.from) && visibleNodeIds.has(link.to)) {
+                    graphDefinition += `${link.raw}\n`;
+                }
+            });
+
+            // 3. 渲染
+            const uniqueId = 'graph-' + Date.now();
+            try {
+                const { svg, bindFunctions } = await mermaid.render(uniqueId, graphDefinition);
+                content.innerHTML = svg;
+                if (bindFunctions) bindFunctions(content);
+            } catch (error) {
+                console.error("Render Error", error);
+                // 容错处理：如果 Mermaid 渲染失败（通常是因为空图或语法冲突），显示提示
+                content.innerHTML = `<div style="color:red; padding:20px;">渲染错误: ${error.message} <br> 可能是当前视图没有子节点或深度过深。</div>`;
+            }
+
+            // 4. 更新 UI
+            loading.style.display = 'none';
+            backBtn.disabled = historyStack.length === 0;
+            
+            // 生成面包屑路径
+            let pathTxt = "Root";
+            if (historyStack.length > 0) {
+                // 简单展示当前节点名，也可以遍历 stack 生成完整路径
+                pathTxt = `... > ${currentNode.label}`;
+            } else if (currentNode.label) {
+                pathTxt = currentNode.label;
+            }
+            breadcrumbs.innerText = `当前位置: ${pathTxt} (当前显示层数: ${viewDepth})`;
+        }
+        
+        // ==========================================
+        // 4. 缩放和拖动功能 (已修改)
+        // ==========================================
+        
+        function zoomIn() {
+            // 获取鼠标位置
+            const wrapper = document.getElementById('diagram-wrapper');
+            const rect = wrapper.getBoundingClientRect();
+            const mouseX = lastMouseX - rect.left;
+            const mouseY = lastMouseY - rect.top;
+            
+            // 计算缩放前的鼠标位置相对于内容的比例
+            const contentX = (mouseX - offsetX) / scale;
+            const contentY = (mouseY - offsetY) / scale;
+            
+            // 更新缩放比例
+            scale += 0.1*scale;
+            
+            // 计算缩放后的偏移量，使鼠标下的点保持在同一位置
+            offsetX = mouseX - contentX * scale;
+            offsetY = mouseY - contentY * scale;
+            
+            updateZoom();
+        }
+        
+        function zoomOut() {
+            // 获取鼠标位置
+            const wrapper = document.getElementById('diagram-wrapper');
+            const rect = wrapper.getBoundingClientRect();
+            const mouseX = lastMouseX - rect.left;
+            const mouseY = lastMouseY - rect.top;
+            
+            // 计算缩放前的鼠标位置相对于内容的比例
+            const contentX = (mouseX - offsetX) / scale;
+            const contentY = (mouseY - offsetY) / scale;
+            
+            // 更新缩放比例
+            scale = Math.max(0.1, 0.9*scale);
+            
+            // 计算缩放后的偏移量，使鼠标下的点保持在同一位置
+            offsetX = mouseX - contentX * scale;
+            offsetY = mouseY - contentY * scale;
+            
+            updateZoom();
+        }
+        
+        function resetZoom() {
+            const wrapper = document.getElementById('diagram-wrapper');
+            const content = document.getElementById('diagram-content');
+            
+            // 重置缩放比例
+            scale = 1;
+            
+            // 计算居中偏移
+            const wrapperRect = wrapper.getBoundingClientRect();
+            const contentRect = content.getBoundingClientRect();
+            
+            // 将内容居中显示
+            offsetX = (wrapperRect.width - contentRect.width * scale) / 2;
+            offsetY = (wrapperRect.height - contentRect.height * scale) / 2;
+            
+            updateZoom();
+        }
+        
+        function updateZoom() {
+            const content = document.getElementById('diagram-content');
+            const indicator = document.getElementById('zoomIndicator');
+            
+            content.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+            indicator.textContent = `${Math.round(scale * 100)}%`;
+        }
+        
+        // 记录鼠标位置
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+        
+        // 初始化拖拽功能
+        function initDrag() {
+            const wrapper = document.getElementById('diagram-wrapper');
+            const content = document.getElementById('diagram-content');
+            
+            // 记录鼠标位置
+            wrapper.addEventListener('mousemove', (e) => {
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+            
+            wrapper.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; // 只处理左键
+                
+                isDragging = true;
+                startX = e.clientX - offsetX;
+                startY = e.clientY - offsetY;
+                wrapper.style.cursor = 'grabbing';
+            });
+            
+            wrapper.addEventListener('mouseleave', () => {
+                isDragging = false;
+                wrapper.style.cursor = 'grab';
+            });
+            
+            wrapper.addEventListener('mouseup', () => {
+                isDragging = false;
+                wrapper.style.cursor = 'grab';
+            });
+            
+            wrapper.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                e.preventDefault();
+                
+                offsetX = e.clientX - startX;
+                offsetY = e.clientY - startY;
+                
+                updateZoom();
+            });
+            
+            // 滚轮缩放功能
+            wrapper.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                
+                // 计算缩放前的鼠标位置
+                const rect = wrapper.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                // 计算鼠标位置相对于内容的比例
+                const contentX = (mouseX - offsetX) / scale;
+                const contentY = (mouseY - offsetY) / scale;
+                
+                // 更新缩放比例
+                if (e.deltaY < 0) {
+                    // 向上滚动，放大
+                    scale += 0.1*scale;
+                } else {
+                    // 向下滚动，缩小
+                    scale = Math.max(0.1, 0.9*scale);
+                }
+                
+                // 计算缩放后的偏移量，使鼠标下的点保持在同一位置
+                offsetX = mouseX - contentX * scale;
+                offsetY = mouseY - contentY * scale;
+                
+                // 应用缩放
+                updateZoom();
+            }, { passive: false });
+        }
+        
+        // 预置 Demo 加载逻辑
+        window.loadDemo = function() {
+            document.getElementById('mermaidInput').value = demoCode;
+            parseAndLoad();
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 自动加载一次 Demo 以便展示效果
+            updateDepth();
+            loadDemo();
+            resetZoom();
+            initDrag();
+        });
+
+    </script>
+</body>
+</html>
